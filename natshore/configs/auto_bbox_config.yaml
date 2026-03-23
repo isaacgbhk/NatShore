@@ -9,46 +9,15 @@ s0:
   shore_folders: Shp_files/splitted_shoreline_polygon
 
   # Result/logs folder name = year + suffix + mode + datetime
-  # year  : [2024, 2023, 2022, 2021, 2020, 2019]
-  # year  : [1990, 1995, 2000, 2005, 2010, 2015, 2020]
-  # year  : [1995, 1997, 1999, 2001, 2003, 2005, 2007, 2009, 2011, 2013, 2015, 2017, 2019, 2021, 2023]
-  # year  : [1995, 1997, 1999, 2001, 2003, 2005, 2007, 2009, 2011, 2013, 2015, 2017, 2019, 2021, 2023]
   year  : [2024]
   year_range : 0 # Number of years start from year for searching best tide date, e.g. 2018: 2018 + 2
   
-  target_tidal_height: [0.0] #[-1.0, -0.5, 0.0, 0.5, 1.0] # meters
-  # target_tidal_height: [-1.0, -0.5, 0.0, 0.5, 1.0] # meters
-  # target_tidal_height: [-1.0, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] # meters
+  target_tidal_height: [-1.0, -0.5, 0.0, 0.5, 1.0] # meters
 
   ## Target IDs
-  # suffix: "AUS"
-  # target_ids         : ["6"]
-  
-  # suffix: "NZ"
-  # target_ids         : ["18"]
 
-  # suffix: "TW"
-  # target_ids         : ["44"]
-
-  # suffix: "UK"
-  # target_ids         : ["26"] #["26", "15"]
-
-  # suffix: "Banda_Aceh"
-  # target_ids         : ["12"]
-
-  suffix: "KM"
-  target_ids         : ["1202"]
-
-  # suffix: "Wadden_Sea"
-  # target_ids         : ["0-E"]
-
-  # suffix: "MD"
-  # target_ids         : ["10"]
-  
-  # suffix: "Test" #"MD" "UK" "JP" 
-
-
-  # Geedim_collection  : "COPERNICUS/S2_SR_HARMONIZED"
+  suffix: "UK"
+  target_ids         : ["26"]
   
 # Stage 1 - Bounding Box
 s1: 

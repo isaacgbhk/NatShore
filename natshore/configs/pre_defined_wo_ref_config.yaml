@@ -1,0 +1,64 @@
+base_path : ""
+
+# Stage 0 -Global Variables
+s0: 
+  mode: "defined_bbox_wo_ref" # "auto_bbox" or "defined_bbox" or "defined_bbox_wo_ref"
+
+  # Folder name under "data" folder
+  river_folders: Shp_files/splitted_river_linstring
+  shore_folders: Shp_files/splitted_shoreline_polygon
+
+  # Result/logs folder name = year + suffix + mode + datetime
+  # year  : [2023, 2022, 2021, 2020, 2019, 2018, 2017]
+  # year  : [2023, 2022, 2021, 2020, 2019]
+  year  : [2022]
+  year_range : 0 # Number of years start from year for searching best tide date, e.g. 2018: 2018 + 2
+  
+  target_tidal_height: [0.0] #[-1.0, -0.5, 0.0, 0.5, 1.0] # meters
+  # target_tidal_height: [-1.0, -0.5, 0.0, 0.5, 1.0] # meters
+
+  ## Target IDs
+  # suffix: "TW" #"MD" "UK" "JP" 
+  suffix: "US" #"MD" "UK" "JP" 
+  # suffix: "Ind" #"MD" "UK" "JP" 
+
+  # UK: 
+  # target_ids         : ["26"] #["26", "15"] # id of the river and shore in data folder
+  # target_ids         : ["15"] # id of the river and shore in data folder
+
+  # NZ: 
+  # target_ids         : ["18"]
+
+  # TW:
+  target_ids         : ["great_lakes"]
+
+  Geedim_collection  : "COPERNICUS/S2_SR_HARMONIZED"
+  
+# Stage 1 - Bounding Box
+s1: 
+  min_area_th_degree   : 0.01    # Minimum area of bbox
+  min_edge_th_km       : 10      # Minimum length of edge of bbox
+  max_area_th_degree   : 0.10    # Maximum area of bbox
+  max_edge_th_km       : 10      # Maximum length of edge of bbox
+  bbox_expand          : 0.01    # Expand degree of bbox
+  shore_expand         : 0.005   # Expand of shoreline for reference points
+  shore_n_segments     : 100     # Number of segments of shoreline for reference points
+  min_dist_th          : 0.02    # From River head to shoreline
+  iou_th               : 0.2     # IOU threshold
+  
+
+# Stage 2A - Best Date & Tidal Height
+s2A:
+  cloudless_portion   : 99
+  fill_portion        : 99
+  max_retry           : 3    # For EE use limit or non data found
+
+# Stage 2B - Download Best Date & Tidal Height Data
+s2B: 
+  max_retry          : 3
+
+# Stage 3 - Extract Shoreline
+s3:
+  MACWE_iteration   : 20   ##iterations: Number of iterations to run
+  MACWE_smooth      : 1 #default 1~4  Larger values lead to smoother segmentations.
+  max_retry         : 3

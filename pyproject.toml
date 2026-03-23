@@ -1,0 +1,24 @@
+[project]
+name = "natshore"
+version = "0.1.0"
+description = "NatShore is an open-source Python framework that automates shoreline mapping and spatio-temporal analysis at large geographic extent. It combines physics-informed spatial units, tide-aware image selection, and a pixel-level confidence measure so that outputs are reproducible, traceable, and suitable for coastal monitoring, hazard assessment, intertidal studies, and policy-relevant shoreline observation."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cmcrameri>=1.9",
+    "gdal==3.8.4",
+    "geedim>=2.0.0",
+    "geopandas>=1.1.3",
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
+    "matplotlib-scalebar>=0.9.0",
+    "pandas>=3.0.1",
+    "pyyaml>=6.0.3",
+    "scikit-image>=0.26.0",
+    "scikit-learn>=1.8.0",
+    "tpxo-tide-prediction",
+]
+
+[tool.uv.sources]
+tpxo-tide-prediction = { git = "https://github.com/fwrnke/tpxo-tide-prediction.git" }
