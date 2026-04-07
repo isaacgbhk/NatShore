@@ -6,6 +6,12 @@ NatShore is an open-source Python framework that automates shoreline mapping and
 
 ![Conceptual overview of the NatShore workflow](images/abstractFig_NatShore.png)
 
+Reference paper: 
+
+If you use the code for a publication, please cite it using the [DOI](https://doi.org/10.1016/j.jag.2026.105277) of the following paper : [NatShore: Automated nation-scale shoreline extraction and change analysis using multidecadal cross-mission remote sensing data](https://doi.org/10.1016/j.jag.2026.105277)
+
+
+
 ## Features
 
 - **Automated or predefined regions** — derive analysis bounding boxes from river–shore geometry (`auto_bbox`) or supply predefined boxes (`defined_bbox`, `defined_bbox_wo_ref`).
