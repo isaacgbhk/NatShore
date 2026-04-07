@@ -1,15 +1,29 @@
-@article{hung_natshore_2026,
-	title = {{NatShore}: {Automated} nation-scale shoreline extraction and change analysis using multidecadal cross-mission remote sensing data},
-	volume = {149},
-	issn = {15698432},
-	shorttitle = {{NatShore}},
-	url = {https://linkinghub.elsevier.com/retrieve/pii/S1569843226001937},
-	doi = {10.1016/j.jag.2026.105277},
-	language = {en},
-	urldate = {2026-04-07},
-	journal = {International Journal of Applied Earth Observation and Geoinformation},
-	author = {Hung, Ho Tin and Tsai, Ya-Lun S.},
-	month = may,
-	year = {2026},
-	pages = {105277},
-}
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Hung"
+  given-names: "Ho Tin"
+  orcid: "https://orcid.org/0000-0002-9301-1694"
+- family-names: "Tsai"
+  given-names: "Ya-Lun S."
+  orcid: "https://orcid.org/0000-0003-1893-7400"
+title: "NatShore: Automated nation-scale shoreline extraction and change analysis using multidecadal cross-mission remote sensing data"
+doi: 10.1016/j.jag.2026.105277
+date-released: 2026-04-07
+url: "https://github.com/hthung/NatShore"
+preferred-citation:
+  type: article
+  authors:
+  - family-names: "Hung"
+    given-names: "Ho Tin"
+    orcid: "https://orcid.org/0000-0002-9301-1694"
+  - family-names: "Tsai"
+    given-names: "Ya-Lun S."
+    orcid: "https://orcid.org/0000-0003-1893-7400"
+  doi: "10.1016/j.jag.2026.105277"
+  journal: "International Journal of Applied Earth Observation and Geoinformation"
+  month: 5
+  volume: 149
+  year: 2026
+  start: 105277
+  title: "NatShore: Automated nation-scale shoreline extraction and change analysis using multidecadal cross-mission remote sensing data"
