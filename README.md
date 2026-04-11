@@ -8,7 +8,11 @@ NatShore is an open-source Python framework that automates shoreline mapping and
 
 Reference paper: 
 
-If you use the code for a publication, please cite it using the [DOI](https://doi.org/10.1016/j.jag.2026.105277) of the following paper : [NatShore: Automated nation-scale shoreline extraction and change analysis using multidecadal cross-mission remote sensing data](https://doi.org/10.1016/j.jag.2026.105277)
+If you use the code for a publication, please cite it using the [DOI](https://doi.org/10.1016/j.jag.2026.105277) of the following paper : 
+
+Hung, H.-T. and Tsai, Y.-L.* (2026). [NatShore: Automated nation-scale shoreline extraction and change analysis using multidecadal cross-mission remote sensing data](https://doi.org/10.1016/j.jag.2026.105277). International Journal of Applied Earth Observation and Geoinformation, 149, 105277, doi: [10.1016/j.jag.2026.105277](https://doi.org/10.1016/j.jag.2026.105277)
+
+
 
 
 
