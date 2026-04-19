@@ -1,26 +1,31 @@
 base_path : ""
 
 # Stage 0 -Global Variables
-s0: 
+s0:
   mode: "auto_bbox" # "auto_bbox" or "defined_bbox"
 
   # Folder name under "data" folder
-  river_folders: Shp_files/splitted_river_linstring
-  shore_folders: Shp_files/splitted_shoreline_polygon
+  river_folders: data/Shp_files/splitted_river_linstring
+  shore_folders: data/Shp_files/splitted_shoreline_polygon
 
   # Result/logs folder name = year + suffix + mode + datetime
   year  : [2024]
   year_range : 0 # Number of years start from year for searching best tide date, e.g. 2018: 2018 + 2
-  
-  target_tidal_height: [-1.0, -0.5, 0.0, 0.5, 1.0] # meters
+
+  target_tidal_height: [0.0] # meters
 
   ## Target IDs
 
   suffix: "UK"
   target_ids         : ["26"]
+
+  random_seed        : 42   # Seed for numpy/sklearn RNG — keep fixed for reproducibility
+  gee_project        : ""   # GEE project ID (run `earthengine authenticate` first)
+  max_workers        : 5    # Maximum parallel workers for multiprocessing pool
   
 # Stage 1 - Bounding Box
-s1: 
+s1:
+  tidal_model          : "data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc"  # Path to TPXO9 atlas (relative to natshore/)
   min_area_th_degree   : 0.1   # Minimum area of bbox
   min_edge_th_km       : 20       # Minimum length of edge of bbox
   max_area_th_degree   : 0.10    # Maximum area of bbox

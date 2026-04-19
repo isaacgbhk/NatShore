@@ -1,4 +1,6 @@
 _misc
+data
+results
 *.tif
 
 # Byte-compiled / optimized / DLL files

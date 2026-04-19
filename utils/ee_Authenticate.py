@@ -11,4 +11,4 @@ gcloud init
 
 
 ee.Authenticate()
-ee.Initialize(project='my-project')
+ee.Initialize()
