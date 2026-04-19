@@ -3,38 +3,41 @@ from osgeo import gdal, ogr, osr
 from shapely.geometry import box
 from shapely.wkb import loads as wkb_loads
 from skimage import io
-from skimage.segmentation import morphological_chan_vese, checkerboard_level_set, random_walker
+from skimage.segmentation import morphological_chan_vese, checkerboard_level_set
 from skimage.transform import resize
 from sklearn.decomposition import PCA
-from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
-
 from shapely.geometry import Polygon, MultiPolygon
 import geopandas as gpd
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
-import sys
 import os
 import time
-
-def warn(*args, **kwargs): pass
 import warnings
-warnings.warn = warn
+
+warnings.filterwarnings("ignore")
+
+logger = logging.getLogger(__name__)
 
 # region Helper functions
-def DataRange(centralDstr,beforeDays,afterDays):
-    realD = datetime.strptime(centralDstr, "%Y-%m-%d")
-    Dminu = (realD - timedelta(days=beforeDays)).strftime("%Y-%m-%d")
-    Dplus = (realD + timedelta(days=afterDays)).strftime("%Y-%m-%d") 
-    return [Dminu,Dplus]
+def date_range(central_date: str, before_days: int, after_days: int,
+               fmt: str = "%Y-%m-%d") -> list[str]:
+    """Return [start, end] date strings bracketing ``central_date`` by the given offsets.
 
-def DataRange2(centralDstr,beforeDays,afterDays):
-    realD = datetime.strptime(centralDstr, "%Y%m%d")
-    Dminu = (realD - timedelta(days=beforeDays)).strftime("%Y-%m-%d")
-    Dplus = (realD + timedelta(days=afterDays)).strftime("%Y-%m-%d") 
-    return [Dminu,Dplus]
+    Args:
+        central_date: Centre date string in ``fmt`` format.
+        before_days: Days to subtract for the start date.
+        after_days: Days to add for the end date.
+        fmt: strptime/strftime format of ``central_date`` (default ``%Y-%m-%d``).
+    """
+    real = datetime.strptime(central_date, fmt)
+    return [
+        (real - timedelta(days=before_days)).strftime("%Y-%m-%d"),
+        (real + timedelta(days=after_days)).strftime("%Y-%m-%d"),
+    ]
 
 def plot_all_imgs(list_of_imgs,dpii=150,axiss=True,x=12,y=18):
     # Subplots are organized in a Rows x Cols Grid
@@ -305,7 +308,7 @@ def create_selected_ACMshapefile_max_overlap(input_vector_path, output_vector_pa
         output_vector_path (str): Path to save the selected feature (e.g., 'selected_feature.shp').
     """
 
-    print(f"Reading input features from: {input_vector_path}")
+    # print(f"Reading input features from: {input_vector_path}")
     try:
         input_gdf = gpd.read_file(input_vector_path)
     except Exception as e:
@@ -320,8 +323,8 @@ def create_selected_ACMshapefile_max_overlap(input_vector_path, output_vector_pa
         return None
 
     # --- CRS Handling ---
-    print(f"Input CRS: {input_gdf.crs}")
-    print(f"Sea Area CRS: {target_area_gdf.crs}")
+    # print(f"Input CRS: {input_gdf.crs}")
+    # print(f"Sea Area CRS: {target_area_gdf.crs}")
 
     if input_gdf.crs != target_area_gdf.crs:
         print(f"Warning: CRS mismatch. Reprojecting input features to {target_area_gdf.crs}...")
@@ -342,17 +345,17 @@ def create_selected_ACMshapefile_max_overlap(input_vector_path, output_vector_pa
 
     # --- Prepare Sea Area Geometry AND Calculate Total Sea Area ---
     try:
-        print("Dissolving sea area polygons...")
+        # print("Dissolving sea area polygons...")
         # Dissolve sea polygons and get the single resulting geometry
         sea_geometry = target_area_gdf.dissolve().geometry.iloc[0]
         if not sea_geometry.is_valid:
             print("Warning: Dissolved sea area geometry is not valid, attempting buffer(0).")
             sea_geometry = sea_geometry.buffer(0)
-        print(f"Sea area geometry type after dissolve: {type(sea_geometry)}")
+        # print(f"Sea area geometry type after dissolve: {type(sea_geometry)}")
 
         # Calculate the TOTAL area of the dissolved sea geometry ONCE
         total_sea_area = sea_geometry.area
-        print(f"Total Sea Area calculated: {total_sea_area:.4f} (in CRS units squared)")
+        # print(f"Total Sea Area calculated: {total_sea_area:.4f} (in CRS units squared)")
 
         # Handle case where sea area is zero or negligible
         if total_sea_area < 1e-9:
@@ -475,11 +478,11 @@ def create_selected_ACMshapefile(in_dir_shp, out_dir_shp):
     driver = ogr.GetDriverByName("ESRI Shapefile")
     dataSource = driver.Open(in_dir_shp, 1)
     input_layer = dataSource.GetLayer()    
-    print("original features #: "+str(input_layer.GetFeatureCount()))
+    # print("original features #: "+str(input_layer.GetFeatureCount()))
     
     ## Filter 1: selecting ACM raster value = 1
     # input_layer.SetAttributeFilter('VALUEE = 1') #e.g., 'VALUEE = 1' # doesnt matter 1 or 0.... ACM gives random results
-    print(input_layer.GetFeatureCount()) # how many features
+    # print(input_layer.GetFeatureCount()) # how many features
     
     ##################################################################################
     # [Original: Only output the MAX area]
@@ -594,17 +597,37 @@ def get_shoreline_mask(coor_bbox, shoreline_lines, new_size, shore_offset):
 
 def s3_extract_shoreline(
                          base_path         : str,
-                         save_folder       : str, 
-                         bbox_idx          : str, 
-                         final_save_folder : str, 
-                         MACWE_iteration   : int, 
+                         save_folder       : str,
+                         bbox_idx          : str,
+                         final_save_folder : str,
+                         MACWE_iteration   : int,
                          MACWE_smooth      : int,
                          disable_print     : bool,
-                         ):
-    
-    # try:    
-    if disable_print: 
-        sys.stdout = open(os.devnull, 'w')
+                         random_seed       : int = 42,
+                         shore_folders     : str = "data/Shp_files/splitted_shoreline_polygon",
+                         ) -> None:
+    """
+    Extract a shoreline from a downloaded satellite image using PCA and MACWE.
+
+    Pipeline:
+        1. Build a VRT from the GeoTIFF; generate RGB composite and cloud/nodata mask.
+        2. PCA on all bands (retaining 90% explained variance) → first PC projection.
+        3. Morphological Active Contours Without Edges (MACWE) on the PC1 projection.
+        4. Polygon → line conversion, bbox-edge removal, area calculation.
+        5. Export final shoreline shapefile to ``save_folder/<final_save_folder>/PCA_Shoreline/``.
+
+    Args:
+        base_path: Absolute path to the ``natshore/`` directory.
+        save_folder: Run-specific output directory for this target/year/tide.
+        bbox_idx: Identifier string ``<island_id>_<box_index>``.
+        final_save_folder: Name of the final output sub-folder.
+        MACWE_iteration: Number of MACWE evolution iterations.
+        MACWE_smooth: MACWE smoothing parameter (1–4; larger = smoother).
+        disable_print: Suppress INFO-level logging in worker processes.
+        random_seed: Random seed for PCA and KMeans (ensures reproducibility).
+    """
+    if disable_print:
+        logging.disable(logging.INFO)
         
     # region Set parameters
     
@@ -619,19 +642,15 @@ def s3_extract_shoreline(
     best_date = best_date.strftime("%Y-%m-%d-%H-%M-%S")
     best_height = float(best_height)
 
-    print(f"bbox_idx: {bbox_idx}, save_folder: {save_folder}, MACWE_iteration: {MACWE_iteration}, MACWE_smooth: {MACWE_smooth}")
+    # print(f"bbox_idx: {bbox_idx}, save_folder: {save_folder}, MACWE_iteration: {MACWE_iteration}, MACWE_smooth: {MACWE_smooth}")
     # year = save_folder.split("/")[-1]
     
     sensor = "S2H"
-    # band_index = (0,1,2,3,7,10,11) ## S2 band: 1/2/3/4/8/11/12
-    # band_index = (0,1,2,3,4,5,6) ## S2 band: 1/2/3/4/8/11/12
-
-    GEEresolution = 10.0 # (m) with .0
-    threshold_explained_variance = 0.90 
+    GEEresolution = 10.0                  # metres; Sentinel-2 native resolution
+    threshold_explained_variance = 0.90   # PCA retains components explaining ≥90% variance
     projection, crss = "Mercator", "EPSG:3395"
-
-    checkerboard_level = 5 # default is 5
-    paraStr = str(checkerboard_level) + "_" + str(MACWE_iteration) + "_" + str(MACWE_smooth)
+    checkerboard_level = 5                # initial level-set for MACWE
+    paraStr = f"{checkerboard_level}_{MACWE_iteration}_{MACWE_smooth}"
     shore_offset = 0.01
 
     ############################################################################################################
@@ -642,12 +661,12 @@ def s3_extract_shoreline(
     # base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     target_id, bbox_i = bbox_idx.split("_")[0], int(bbox_idx.split("_")[1])
 
-    shore_data = gpd.read_file(f"{base_path}/data/Shp_files/splitted_shoreline_polygon/Shoreline_polygon_id_{target_id}")
+    shore_data = gpd.read_file(f"{base_path}/{shore_folders}/Shoreline_polygon_id_{target_id}")
     shoreline_lines = shore_data.boundary
     shoreline_lines = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shoreline_lines))
         
     bbox = [[x1, y1], [x2, y1], [x2, y2], [x1, y2], [x1, y1]]    # region= {"type": "Polygon","coordinates": [bbox]}
-    print(bbox)
+    # print(bbox)
     # Crop the shoreline lines to the bbox
     # shoreline_lines = gpd.overlay(shoreline_lines, bbox, how='intersection')
 
@@ -668,7 +687,7 @@ def s3_extract_shoreline(
     if os.path.exists(f"{save_folder}/{final_save_folder}/PCA_Shoreline/" + "PCA_" + out_name + "_1thPCA_ACMselecL_RMbbox.shp"):
         # and \
         # os.path.exists(f"{save_folder}/{final_save_folder}/" + out_name + "_Kmeans_ACMselecL_RMbbox.shp"):
-        # print(f"{out_name} File already exists, skipping...")
+        print(f"{out_name} File already exists, skipping...")
         return 
     
     # region STEP 3: make Cloud mask
@@ -716,140 +735,63 @@ def s3_extract_shoreline(
     del out 
     # endregion
     
-    print(f" 3.1&2 Read and make .vrt done, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
+    logger.info(" 3.1&2 VRT + RGB done, time: %.3f sec.", time.time() - start) ; start = time.time()
 
-    # 3.3 generate cloud mask
-    imm = io.imread(tiffimg)[0,:,:] # using img"s 1st layer 
-    missing_mask = imm == 0 # 0 is missing value
-    print(" > Image shape: ", imm.shape)
-    # shore_mask = get_shoreline_mask(coor, shoreline_lines, imm.shape, shore_offset)
+    # 3.3 generate nodata/cloud mask (band 0: 0 = missing, else = valid)
+    imm = io.imread(tiffimg)[0, :, :]
+    missing_mask = imm == 0
 
-    Num_nan_pixels    = np.count_nonzero(imm==0) # if download with uint16
-    Num_nonnan_pixels = np.count_nonzero(imm)
+    cloud_pct = 100.0 * np.count_nonzero(imm == 0) / imm.size
+    logger.info(" > Image shape: %s  nodata: %.2f%%", imm.shape, cloud_pct)
 
-    CloudPerct = 100.0 * Num_nan_pixels / (Num_nan_pixels + Num_nonnan_pixels) #cloud percentage
-    print(" > Cloud "+ f"{CloudPerct: .2f}"+" %")  
+    imm[imm != 0] = 1
+    imm[imm == 0] = 2  # create_selected_CLOUDshapefile expects: 1=valid, 2=nodata
 
-    imm[imm!=0] = 1 # replace non-NaN to 0
-    imm[imm==0] = 2 # affecting fn. create_selected_CLOUDshapefile        
-    # now imm is a binary map (cloud =1, rest=0) 
-
-    array2geotif(f"{Geedim_outimg_path}/_NODATA/" + out_name + "NODATA.tif", imm, vrt)    
+    array2geotif(f"{Geedim_outimg_path}/_NODATA/" + out_name + "NODATA.tif", imm, vrt)
     del imm
-            
-    print(f"array2geotif, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
+
+    logger.info(" 3.3 Nodata mask done, time: %.3f sec.", time.time() - start) ; start = time.time()
     geotif2shp(f"{Geedim_outimg_path}/_NODATA/",  out_name + "NODATA.tif", f"{Geedim_outimg_path}/_NODATA/", out_name + "NODATA.shp") 
-    print(f"geotif2shp, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
+    # print(f"geotif2shp, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
     create_selected_CLOUDshapefile(f"{Geedim_outimg_path}/_NODATA/" + out_name + "NODATA.shp",
                                     f"{Geedim_outimg_path}/_NODATAselec/" + out_name + "NODATAselec.shp")
-    print(f"create_selected_CLOUDshapefile, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
-    print(f" 3.3 Generate cloud.shp done.")
+    logger.info(" 3.3 Nodata shapefile done, time: %.3f sec.", time.time() - start) ; start = time.time()
 
     # endregion 
     
     # region STEP 4: PCA analysis
-    ############################## STEP 4: PCA & Kmeans analysis ##############################
-    """
-    # 4.1 select bands
-    im          = io.imread(tiffimg)
-    fill_mask   = im[23,:,:] == 0 # 24th band is fill mask
-    layered_img = im[band_index,:,:] 
-
-    # !!!!!! Filter out missing pixels and Shore mask !!!!!!
-    layered_img[:, fill_mask]  = int(-9999)
-    # layered_img[:, shore_mask == 0] = int(-9999)
-
-    # 4.2 impute cloud pixels
-    for layer in range(layered_img.shape[0]): # imputer for each band individually
-        imputer = SimpleImputer(missing_values = 0, strategy="mean")
-        imputed_layer = imputer.fit_transform(layered_img[layer,:,:])     
-        
-        if imputed_layer.shape == layered_img[layer,:,:].shape:
-            layered_img[layer,:,:] = imputed_layer
-            
-        else:       
-            tp_raw_layer           = np.transpose(layered_img[layer,:,:])
-            tp_imputed_layer       = imputer.fit_transform(tp_raw_layer)
-            tp_tp_imputed_layer    = np.transpose(tp_imputed_layer)
-            layered_img[layer,:,:] = tp_tp_imputed_layer
-    """
-    # 4.1 select bands
+    ############################## STEP 4: PCA analysis ##############################
+    # 4.1 load all bands
     im = io.imread(tiffimg)
-    # layered_img = im[band_index,:,:] 
     layered_img = im
 
-    kmean_extract = False
-
-    # 4.2 impute cloud pixels
-    # for layer in range(layered_img.shape[0]): # imputer for each band individually
-    #     # Check missing values (0)
-    
-    #     imputer = SimpleImputer(missing_values=0, strategy='mean') 
-    #     imputed_layer = imputer.fit_transform(layered_img[layer,:,:])     
-        
-    #     if imputed_layer.shape==layered_img[layer,:,:].shape:
-    #         layered_img[layer,:,:] = imputed_layer
-            
-    #     else:       
-    #         tp_raw_layer=np.transpose(layered_img[layer,:,:])
-    #         tp_imputed_layer = imputer.fit_transform(tp_raw_layer)      
-    #         tp_tp_imputed_layer = np.transpose(tp_imputed_layer)
-    #         layered_img[layer,:,:] = tp_tp_imputed_layer
-    
-    # 4.3 reshape & rescale 
-    nbands, nx, ny     = layered_img.shape  
-    layered_img_shaped = layered_img.reshape((nbands,nx * ny))  ; del layered_img
+    # 4.2 reshape & standardise
+    nbands, nx, ny      = layered_img.shape
+    layered_img_shaped  = layered_img.reshape((nbands, nx * ny)) ; del layered_img
     scaler = StandardScaler()
-    layered_img_shaped_rescaled = scaler.fit_transform(layered_img_shaped) # rescale each band individually
+    layered_img_shaped_rescaled = scaler.fit_transform(layered_img_shaped)
     del layered_img_shaped
 
-    print(f" 3.1 Select band, impute, reshape/rescale done, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
+    logger.info(" 4.1 Reshape/rescale done, time: %.3f sec.", time.time() - start) ; start = time.time()
 
-    # 4.4 PCA & Kmeans analysis
-
-    pca    = PCA(n_components = threshold_explained_variance).fit(layered_img_shaped_rescaled.T)
-    first_compo   = pca.components_[0]#.reshape((nx, ny)) 
-    pc1_proj      = (first_compo @ layered_img_shaped_rescaled).reshape(nx, ny)
-
-    if kmean_extract:
-        kmeans = KMeans(n_clusters=2, random_state=0).fit(layered_img_shaped_rescaled.T)
-        kmeans_result = kmeans.labels_.reshape((nx, ny))
-        array2geotif(f"{Geedim_outimg_path}/Kmeans/" + out_name + "_kmeans.tif", kmeans_result, vrt, gdal.GDT_Float32)
-    
-    del layered_img_shaped_rescaled #, kmeans
+    # 4.3 PCA — retain components explaining threshold_explained_variance of variance
+    pca         = PCA(n_components=threshold_explained_variance, random_state=random_seed).fit(layered_img_shaped_rescaled.T)
+    first_compo = pca.components_[0]
+    pc1_proj    = (first_compo @ layered_img_shaped_rescaled).reshape(nx, ny)
+    del layered_img_shaped_rescaled
 
     array2geotif(f"{Geedim_outimg_path}/PCA/" + out_name + "_1thPCA.tif", pc1_proj, vrt, gdal.GDT_Float32)
-    print(f" 3.2 PCA done, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
+    logger.info(" 4.2 PCA done, time: %.3f sec.", time.time() - start) ; start = time.time()
     
     # endregion
     
-    # region STEP 5: ACM or Random Walker
-    ############################## STEP 5: ACM for PCA & Kmeans ##############################
-    # 5.1 ACM process - PCA
-    
-    # markers = np.zeros(pc1_proj.shape, dtype=np.uint)
-    # markers[pc1_proj < 0] = 1
-    # markers[pc1_proj > 0] = 2
-    # labels = random_walker(pc1_proj, markers, beta=10, mode='bf')
-    # labels -= 1
-    
-    # ls_last, evolution = MorphACWE(pc1_proj, checkerboard_level, MACWE_iteration, MACWE_smooth)
+    # region STEP 5: MACWE active contour on PCA projection
+    ############################## STEP 5: MACWE ##############################
     ls_PCA, evo = MorphACWE(pc1_proj, checkerboard_level, MACWE_iteration, MACWE_smooth)
-    evo_np = np.array(evo)
-    evo_pathname = f"{save_folder}/{final_save_folder}/Shoreline_evo/evo_" + out_name + ".npy"
+    
+    # np.save(f"{save_folder}/{final_save_folder}/Shoreline_evo/evo_" + out_name + ".npy", evo)
+    logger.info(" 5.1 MACWE done, time: %.3f sec.", time.time() - start) ; start = time.time()
 
-    np.save(evo_pathname, evo)
-
-    
-    print(f" 3.2 ACM processing done, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
-    
-    # evo_idx = [1,5, 10, -1]
-    # evolution = [evolution[i] for i in evo_idx]
-    # for idx, ls in zip(evo_idx, evolution):
-    plt.figure(dpi=250)
-    # plt.imshow(ls_PCA, cmap="rainbow")
-    # plt.imshow(labels, cmap="rainbow")
-    
     uncertainty_map = np.sqrt(pc1_proj**2)
     norm_uncertainty_map = uncertainty_map / np.max(uncertainty_map)
     
@@ -908,161 +850,71 @@ def s3_extract_shoreline(
     
     # endregion
     
-    # 5.2 plot and export - PCA
-    plt.figure(dpi=250) #figsize=(8,10),
-
+    # 5.2 plot PCA projection with MACWE contour overlay
+    plt.figure(dpi=250)
     plt.imshow(pc1_proj, cmap="rainbow")
     plt.colorbar()
-    c = plt.contour(ls_PCA, linewidths=0.3, colors="black")
-    # c = plt.contour(labels, linewidths=0.3, colors="black")
-        
+    plt.contour(ls_PCA, linewidths=0.3, colors="black")
     ax = plt.gca()
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
     ax.axes.xaxis.set_visible(False)
     ax.axes.yaxis.set_visible(False)
-
-    plt.title("BBOX0.5deg: " + str(bbox_i + 1) + "th " + TARGET_DATE + " by " + paraStr)
-            
-    # plt.tight_layout()
-
+    plt.title(f"BBOX{bbox_i + 1} {TARGET_DATE} [{paraStr}]")
     plt.savefig(f"{Geedim_outimg_path}/PCA/" + "PCA_1th_" + out_name + ".png")
     plt.close()
-    
-    # -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  
-    # 5.1 ACM process - Kmeans
-    # ls_last, evolution = MorphACWE(pc1_proj, checkerboard_level, MACWE_iteration, MACWE_smooth)
-    # """
-    
-    print(f" 5.1 ACM processing done, time: {(time.time() - start):.{3}f} sec.") ; start = time.time()
-    
-    # evo_idx = [1,5, 10, -1]
-    # evolution = [evolution[i] for i in evo_idx]
-    # for idx, ls in zip(evo_idx, evolution):
-    if kmean_extract:
-        ls_Kmenas = kmeans_result
-        plt.figure(dpi=250)
-        plt.imshow(ls_Kmenas, cmap="rainbow")
-        plt.colorbar()
-        plt.savefig(f"{Geedim_outimg_path}/Kmeans/" + out_name + f"_evo_ls.png")
-        plt.close()
-    
-        # """    
-        # 5.2 plot and export - Kmeans
-        plt.figure(dpi=250) #figsize=(8,10),
 
-        plt.imshow(pc1_proj, cmap="rainbow")
-        plt.colorbar()
-        c = plt.contour(ls_Kmenas, linewidths=0.3, colors="black")
-            
-        ax = plt.gca()
-        # aspect='equal'
-        ax.set_aspect('equal')
-        ax.axes.xaxis.set_visible(False)
-        ax.axes.yaxis.set_visible(False)
-
-        plt.title("BBOX0.5deg: " + str(bbox_i + 1) + "th " + TARGET_DATE + " by " + paraStr)        
-        plt.tight_layout()
-        
-        plt.savefig(f"{Geedim_outimg_path}/PCA/" + out_name + "_1thPCA.png")
-        plt.close()
-
+    logger.info(" 5.2 MACWE plot done, time: %.3f sec.", time.time() - start) ; start = time.time()
     # endregion
     
     # region STEP 6: Export tif & shp
     ############################## STEP 6: Export tif & shp ##############################
-    array2geotif(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.tif", ls_PCA, vrt) 
-    # array2geotif(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.tif", labels, vrt) 
-    geotif2shp(f"{Geedim_outimg_path}/PCA_ACM/", out_name + "_1thPCA_ACM.tif", 
-                f"{Geedim_outimg_path}/PCA_ACM/", out_name + "_1thPCA_ACM.shp") 
+    array2geotif(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.tif", ls_PCA, vrt)
+    geotif2shp(f"{Geedim_outimg_path}/PCA_ACM/", out_name + "_1thPCA_ACM.tif",
+               f"{Geedim_outimg_path}/PCA_ACM/", out_name + "_1thPCA_ACM.shp")
 
     addfield_AREAkm2(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.shp")
     addfield_NAME(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.shp", bbox_i)
-    # create_selected_ACMshapefile(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.shp",
-    #                                 f"{Geedim_outimg_path}/PCA_ACMselec/" + out_name + "_1thPCA_ACMselec.shp")
-    
-    # create_selected_ACMshapefile_max_overlap(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.shp",
-    #                                 f"{Geedim_outimg_path}/PCA_ACMselec/" + out_name + "_1thPCA_ACMselec.shp",
-    #                                 sea_area_gdf)
-    
+
     select_multiple_features_by_overlap(f"{Geedim_outimg_path}/PCA_ACM/" + out_name + "_1thPCA_ACM.shp",
                                     f"{Geedim_outimg_path}/PCA_ACMselec/" + out_name + "_1thPCA_ACMselec.shp",
-                                    land_area_gdf) # sea_area_gdf, land_area_gdf
+                                    land_area_gdf)
 
     try:
-        pol2line(f"{Geedim_outimg_path}/PCA_ACMselec/" + out_name + "_1thPCA_ACMselec.shp", 
-                    f"{Geedim_outimg_path}/PCA_ACMselecL/" + out_name + "_1thPCA_ACMselecL.shp")    
+        pol2line(f"{Geedim_outimg_path}/PCA_ACMselec/" + out_name + "_1thPCA_ACMselec.shp",
+                 f"{Geedim_outimg_path}/PCA_ACMselecL/" + out_name + "_1thPCA_ACMselecL.shp")
     except Exception as e:
-        print(f"Error in pol2line: {e}")
+        logger.error("pol2line failed for %s: %s", bbox_idx, e)
+        if disable_print:
+            logging.disable(logging.NOTSET)
         return
 
     addfield_NAME(f"{Geedim_outimg_path}/PCA_ACMselecL/" + out_name + "_1thPCA_ACMselecL.shp", bbox_i)
 
-    # create BBOX from _1thPCA_ACMselecL.shp 
-    bbox = BBOXcoorsMAXMIN(f"{Geedim_outimg_path}/PCA_ACMselecL/" + out_name + "_1thPCA_ACMselecL.shp")    
-    coors2pg(bbox, f"{Geedim_outimg_path}/PCA_ACMselecL_bbox/" + out_name + "_1thPCA_ACMselecL_bbox.shp")    
+    bbox = BBOXcoorsMAXMIN(f"{Geedim_outimg_path}/PCA_ACMselecL/" + out_name + "_1thPCA_ACMselecL.shp")
+    coors2pg(bbox, f"{Geedim_outimg_path}/PCA_ACMselecL_bbox/" + out_name + "_1thPCA_ACMselecL_bbox.shp")
 
-    # erase BBOX from _1thPCA_ACMselecL.shp  
     erase_shapes(f"{Geedim_outimg_path}/PCA_ACMselecL/" + out_name + "_1thPCA_ACMselecL.shp",
-                    f"{Geedim_outimg_path}/PCA_ACMselecL_bbox/" + out_name + "_1thPCA_ACMselecL_bbox.shp",
-                    f"{Geedim_outimg_path}/PCA_ACMselecL_RMbbox/" + out_name + "_1thPCA_ACMselecL_RMbbox.shp") 
-    print("erase BBOX from _1thPCA_ACMselecL.shp done")
+                 f"{Geedim_outimg_path}/PCA_ACMselecL_bbox/" + out_name + "_1thPCA_ACMselecL_bbox.shp",
+                 f"{Geedim_outimg_path}/PCA_ACMselecL_RMbbox/" + out_name + "_1thPCA_ACMselecL_RMbbox.shp")
+    logger.info(" 6.1 Intermediate shapefile done")
 
-    # erase BBOX from _1thPCA_ACMselecL.shp and save to final production folder
     erase_shapes(f"{Geedim_outimg_path}/PCA_ACMselecL/" + out_name + "_1thPCA_ACMselecL.shp",
-                    f"{Geedim_outimg_path}/PCA_ACMselecL_bbox/" + out_name + "_1thPCA_ACMselecL_bbox.shp",
-                    f"{save_folder}/{final_save_folder}/PCA_Shoreline/" + "PCA_" + out_name + "_1thPCA_ACMselecL_RMbbox.shp") 
+                 f"{Geedim_outimg_path}/PCA_ACMselecL_bbox/" + out_name + "_1thPCA_ACMselecL_bbox.shp",
+                 f"{save_folder}/{final_save_folder}/PCA_Shoreline/" + "PCA_" + out_name + "_1thPCA_ACMselecL_RMbbox.shp")
 
 
-    # -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  
-    # """
-    if kmean_extract:
-        array2geotif(f"{Geedim_outimg_path}/Kmeans_ACM/" + out_name + "_Kmeans_ACM.tif", ls_Kmenas, vrt) 
-        geotif2shp(f"{Geedim_outimg_path}/Kmeans_ACM/", out_name + "_Kmeans_ACM.tif", 
-                    f"{Geedim_outimg_path}/Kmeans_ACM/", out_name + "_Kmeans_ACM.shp") 
-
-        addfield_AREAkm2(f"{Geedim_outimg_path}/Kmeans_ACM/" + out_name + "_Kmeans_ACM.shp")
-        addfield_NAME(f"{Geedim_outimg_path}/Kmeans_ACM/" + out_name + "_Kmeans_ACM.shp", bbox_i)
-        create_selected_ACMshapefile(f"{Geedim_outimg_path}/Kmeans_ACM/" + out_name + "_Kmeans_ACM.shp",
-                                        f"{Geedim_outimg_path}/Kmeans_ACMselec/" + out_name + "_Kmeans_ACMselec.shp")
-
-        pol2line(f"{Geedim_outimg_path}/Kmeans_ACMselec/" + out_name + "_Kmeans_ACMselec.shp", 
-                    f"{Geedim_outimg_path}/Kmeans_ACMselecL/" + out_name + "_Kmeans_ACMselecL.shp")    
-
-        addfield_NAME(f"{Geedim_outimg_path}/Kmeans_ACMselecL/" + out_name + "_Kmeans_ACMselecL.shp", bbox_i)
-
-        # create BBOX from _Kmeans_ACMselecL.shp 
-        bbox = BBOXcoorsMAXMIN(f"{Geedim_outimg_path}/Kmeans_ACMselecL/" + out_name + "_Kmeans_ACMselecL.shp")    
-        coors2pg(bbox, f"{Geedim_outimg_path}/Kmeans_ACMselecL_bbox/" + out_name + "_Kmeans_ACMselecL_bbox.shp")    
-
-        print("erase BBOX from _Kmeans_ACMselecL.shp done")
-        # erase BBOX from _Kmeans_ACMselecL.shp  
-        erase_shapes(f"{Geedim_outimg_path}/Kmeans_ACMselecL/" + out_name + "_Kmeans_ACMselecL.shp",
-                        f"{Geedim_outimg_path}/Kmeans_ACMselecL_bbox/" + out_name + "_Kmeans_ACMselecL_bbox.shp",
-                        f"{Geedim_outimg_path}/Kmeans_ACMselecL_RMbbox/" + out_name + "_Kmeans_ACMselecL_RMbbox.shp") 
-
-        # erase BBOX from _Kmeans_ACMselecL.shp  
-        erase_shapes(f"{Geedim_outimg_path}/Kmeans_ACMselecL/" + out_name + "_Kmeans_ACMselecL.shp",
-                        f"{Geedim_outimg_path}/Kmeans_ACMselecL_bbox/" + out_name + "_Kmeans_ACMselecL_bbox.shp",
-                        f"{save_folder}/{final_save_folder}/Kmeans_Shoreline/" + "Kmeans_" +  out_name + "_Kmeans_ACMselecL_RMbbox.shp")  
-                        
-    # """
-
-    if disable_print: 
-        sys.stdout = sys.__stdout__
+    if disable_print:
+        logging.disable(logging.NOTSET)
     
-    # Try, do again if other process is running
+    # Append to the time log; retry once on concurrent write collision
     wrote = False
     while not wrote:
         try:
             with open(f"{save_folder}/s3_time_log.txt", "a") as f:
                 f.write(f"{out_name}, {datetime.now()}\n")
             wrote = True
-        except:
+        except OSError:
             time.sleep(1)
-            
-    print(f" 6 Export tif & shp done, time: {(time.time() - start):.{3}f} sec.", out_name)
+
+    logger.info(" 6 Export done, time: %.3f sec. — %s", time.time() - start, out_name)
     # endregion
-        
-    # except Exception as e:
-    #     with open(f"{save_folder}/s3_error_log.txt", "a") as f:
-    #         f.write(f"{out_name}, {e}, {datetime.now()}\n")

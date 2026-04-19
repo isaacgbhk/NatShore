@@ -6,6 +6,7 @@ from shapely.ops import nearest_points, polylabel
 from tqdm import tqdm
 
 import geopandas as gpd
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -14,6 +15,8 @@ import random
 import time
 
 from tpxo_tide_prediction import (read_parameter_file, tide_predict, write_tides)
+
+logger = logging.getLogger(__name__)
 
 # region Stage 1 util Functions
 def random_color(): # Random color generator, one color and other lighter color
@@ -34,40 +37,32 @@ def haversine_distance(coord1, coord2):
 
     return R * c
 
-def merge_section(data2merge, min_area_th_degree = 0.1, min_edge_th_km = 150):
+def _section_exceeds_thresholds(section, min_area_th_degree, min_edge_th_km):
+    x1, y1, x2, y2 = LineString(section).bounds
+    area = (x2 - x1) * (y2 - y1)
+    width  = haversine_distance((x1, y1), (x2, y1))
+    height = haversine_distance((x1, y1), (x1, y2))
+    both_edges_large = width > min_edge_th_km and height > min_edge_th_km
+    return area >= min_area_th_degree or both_edges_large
+
+
+def merge_section(data2merge, min_area_th_degree=0.1, min_edge_th_km=150):
+    """Merge adjacent shoreline sections that are smaller than the area/edge thresholds."""
     data = data2merge.copy()
+
+    # Forward pass
     i = 0
-    # Forward check
     while i < len(data) - 1:
-        x1, y1, x2, y2 = LineString(data[i]).bounds
-        area = (x2 - x1) * (y2 - y1)
-        
-        width = haversine_distance((x1, y1), (x2, y1))
-        height = haversine_distance((x1, y1), (x1, y2))
-        edges_greater_than_km_th = width > min_edge_th_km and height > min_edge_th_km
-        
-        # print(area < min_area_th_degree, not edges_greater_than_km_th)
-        
-        if area < min_area_th_degree and not edges_greater_than_km_th:
-            # Add data[i] to data[i+1]
+        if not _section_exceeds_thresholds(data[i], min_area_th_degree, min_edge_th_km):
             data[i + 1] = data[i] + data[i + 1]
             data.pop(i)
             i -= 1
         i += 1
 
-    # Backward check
+    # Backward pass
     i = len(data) - 1
     while i > 0:
-        x1, y1, x2, y2 = LineString(data[i]).bounds
-        area = (x2 - x1) * (y2 - y1)
-        
-        width = haversine_distance((x1, y1), (x2, y1))
-        height = haversine_distance((x1, y1), (x1, y2))
-        edges_greater_than_km_th = width > min_edge_th_km and height > min_edge_th_km
-        
-        # print(area < min_area_th_degree, not edges_greater_than_km_th)
-        if area < min_area_th_degree and not edges_greater_than_km_th:
-            # Add data[i] to data[i-1]
+        if not _section_exceeds_thresholds(data[i], min_area_th_degree, min_edge_th_km):
             data[i - 1] = data[i] + data[i - 1]
             data.pop(i)
             i -= 1
@@ -155,29 +150,26 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
                        shore_n_segments   : int,
                        min_dist_th        : float,
                        iou_th             : float,
-                       tides_height_all   : dict ,
-                       target_id          : str
+                       tides_height_all   : dict,
+                       target_id          : str,
+                       tidal_model        : str = "data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc",
                        ):
     """
     Stage 1 - Auto Bounding Box
-    # Find BBox shoreline polygon by shoreline polygon + Merge BBox
-    # Save the merged BBox as shapefile
+    Find BBox shoreline polygon by shoreline polygon + Merge BBox.
+    Save the merged BBox as shapefile.
     """
     
-    river_data, shore_data = gpd.read_file(river_path), gpd.read_file(shore_path) 
-    
+    river_data, shore_data = gpd.read_file(river_path), gpd.read_file(shore_path)
+
     shoreline_lines = shore_data.boundary[0]
     shore_xy = list(shoreline_lines.coords)
-    
+
     island_id = shore_data.id[0]
-    
-    # if os.path.exists(f"{save_folder}/s1/p_all_bbox_with_ref_pt_{island_id}.png"):
-    #     print(f"    [s1] {island_id} already processed")
-    #     return (tides_height_all, {})    
-    
-    river_id = river_path.split("/")[-1].split("-")[0].split("_")[-1]
-    
-    assert len(shore_data.geometry) == 1, 'shoreline_lines geometry length is not 1'
+
+    if len(shore_data.geometry) != 1:
+        raise ValueError(f"Expected exactly one shoreline polygon for island {island_id}, "
+                         f"got {len(shore_data.geometry)}")
     
     start = time.time()
     
@@ -222,17 +214,17 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
         assert section[0] == last_pt, f"Section {idx} is not connected"
         last_pt = section[-1]
     
-    print(f"    [s1] Got {len(sections)} sections - Took {(time.time() - start):.2f} seconds") ; start = time.time()
+    logger.info("    [s1] Got %d sections — %.2f sec.", len(sections), time.time() - start) ; start = time.time()
 
     # endregion
     
     #####################################################################################################################
     # region Merge with area threshold and iou threshold
-    merged_sections = merge_section(sections, min_area_th_degree = min_area_th_degree, min_edge_th_km = min_edge_th_km)
-    print(f"    [s1] Merge to {len(merged_sections)} section with area threshold - Took {(time.time() - start):.2f} seconds") ; start = time.time()
-    
-    merged_sections_iou = merge_overlapping_sections(merged_sections, iou_th = iou_th)
-    print(f"    [s1] Merge to {len(merged_sections_iou)} section with iou threshold - Took {(time.time() - start):.2f} seconds") ; start = time.time()
+    merged_sections = merge_section(sections, min_area_th_degree=min_area_th_degree, min_edge_th_km=min_edge_th_km)
+    logger.info("    [s1] Area-merged → %d sections — %.2f sec.", len(merged_sections), time.time() - start) ; start = time.time()
+
+    merged_sections_iou = merge_overlapping_sections(merged_sections, iou_th=iou_th)
+    logger.info("    [s1] IoU-merged   → %d sections — %.2f sec.", len(merged_sections_iou), time.time() - start) ; start = time.time()
     
     expanded_sections = []
     #####################################################################################################################
@@ -254,44 +246,34 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
         y1 -= bbox_expand #(y2 - y1) * bbox_expand
         y2 += bbox_expand #(y2 - y1) * bbox_expand
         
-        # expanded_sections.append(box(x1, y1, x2, y2))
-        # Random color
-        plt.plot([x1, x2, x2, x1, x1], [y1, y1, y2, y2, y1], color = "orange")
-            
-    plt.title(f"Shoreline sections (ID = {island_id}) with bounding boxes (After Merge)), total {len(areas)} sections")
-    # plt.subplot(1, 2, 2)
-    # plt.hist(areas, bins=100)
-    plt.title(f"Distribution of bounding box areas  (ID = {island_id}), total {len(areas)} sections")
+        plt.plot([x1, x2, x2, x1, x1], [y1, y1, y2, y2, y1], color="orange")
+
+    plt.title(f"Original sections (ID={island_id}), n={len(areas)}")
     plt.tight_layout()
-    plt.savefig(f"{save_folder}/s1/p_ori_sections_{island_id}.png") 
+    plt.savefig(f"{save_folder}/s1/p_ori_sections_{island_id}.png")
     plt.savefig(f"{save_folder}/s1/p_ori_sections_{island_id}.svg")
-    # plt.close("all")
-        
-    #####################################################################################################################
-    # Plot merged_sections_iou
+    plt.close("all")
+
+    # Plot merged + IoU-deduplicated sections with expanded bboxes
     fig, ax = plt.subplots(figsize=(15, 15))
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
     areas = []
-    
-    # for idx, section in tqdm(enumerate(merged_sections_iou)):
-    for idx, section in enumerate(merged_sections_iou): 
+
+    for idx, section in enumerate(merged_sections_iou):
         line = LineString(section)
-        plt.plot(*line.xy) #, label=f"Section {idx}")
+        plt.plot(*line.xy)
         x1, y1, x2, y2 = line.bounds
         areas.append((x2 - x1) * (y2 - y1))
-        
-        x1 -= bbox_expand #(x2 - x1) * bbox_expand
-        x2 += bbox_expand #(x2 - x1) * bbox_expand
-        y1 -= bbox_expand #(y2 - y1) * bbox_expand
-        y2 += bbox_expand #(y2 - y1) * bbox_expand
-        
+
+        x1 -= bbox_expand
+        x2 += bbox_expand
+        y1 -= bbox_expand
+        y2 += bbox_expand
+
         expanded_sections.append(box(x1, y1, x2, y2))
-        plt.plot([x1, x2, x2, x1, x1], [y1, y1, y2, y2, y1], color = "orange")
-            
-    plt.title(f"Shoreline sections (ID = {island_id}) with bounding boxes (After Merge)), total {len(areas)} sections")
-    # plt.subplot(1, 2, 2)
-    # plt.hist(areas, bins=100)
-    plt.title(f"Distribution of bounding box areas  (ID = {island_id}), total {len(areas)} sections")
+        plt.plot([x1, x2, x2, x1, x1], [y1, y1, y2, y2, y1], color="orange")
+
+    plt.title(f"Merged sections (ID={island_id}), n={len(areas)}")
     plt.tight_layout()
     plt.savefig(f"{save_folder}/s1/p_merged_sections_iou_{island_id}.png")
     plt.savefig(f"{save_folder}/s1/p_merged_sections_iou_{island_id}.svg")
@@ -306,7 +288,7 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
     gdf            = gpd.GeoDataFrame(geometry=bboxs)
     gdf.to_file(f"{save_folder}/s1/merged_bbox_shapefiles/{island_id}.shp", driver = 'ESRI Shapefile', crs = "EPSG:4326", engine = "fiona")
     
-    print(f"        * Bbox shapefiles saved to -> {save_folder}/s1/merged_bbox_shapefiles/{island_id}.shp")
+    logger.info("        * Bbox shapefiles → %s/s1/merged_bbox_shapefiles/%s.shp", save_folder, island_id)
     
     text_to_save = ""
     
@@ -317,7 +299,7 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
     with open(f"{save_folder}/s1/merged_bbox_txt_{island_id}.txt",'w') as f: 
         f.writelines(text_to_save)
     
-    print(f"        * Bbox txt saved to -> {save_folder}/s1/merged_bbox_txt_{island_id}.txt")
+    logger.info("        * Bbox txt → %s/s1/merged_bbox_txt_%s.txt", save_folder, island_id)
     
     # endregion
 
@@ -344,15 +326,12 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
     points = [line.interpolate(segment_length * i) for i in range(shore_n_segments)]
 
     if "Banda_Aceh" in save_folder:
-        print("!!!!!!!!!!!!!!!!!")
-        print("!!!!!!!!!!!!!!!!!")
-        print("!!!!!!!!!!!!!!!!!")
-        print(f"Using self-defined points for Banda_Aceh @ Indonesia")
+        # Banda Aceh (Indonesia) has a degenerate river-shore geometry; use fixed reference points.
+        logger.warning("Using hardcoded reference points for Banda_Aceh")
         points = [
             Point((95.26690276694539, 5.568308025640956)),
-            Point((0, 0))
+            Point((0, 0)),
         ]
-        # For Banda_Aceh @ Indonesia
 
     time_range = pd.date_range(start = f"{year}-01-01T00:00:00", end = f"{year + year_range}-12-31T23:59:59", freq = "00h01min00s").astype("datetime64[s]") # Every 1 minute
 
@@ -362,21 +341,20 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
         lons.append(point.x)
 
     if f"{target_id}_{year}" not in tides_height_all:
-        tide_All = tide_predict(f"{base_path}/data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc", np.array(lats), np.array(lons), np.array(time_range))
+        tidal_model_path = tidal_model if os.path.isabs(tidal_model) else os.path.join(base_path, tidal_model)
+        tide_All = tide_predict(tidal_model_path, np.array(lats), np.array(lons), np.array(time_range))
 
         tide_stats = {
-                        "lat"  : np.array(lats),
-                        "lon"  : np.array(lons),
-                        "tide" : list(tide_All.T),
-                        "max"  : tide_All.max(0),
-                        "min"  : tide_All.min(0),
-                        "mean" : tide_All.mean(0),
-                    }
+            "lat"  : np.array(lats),
+            "lon"  : np.array(lons),
+            "tide" : list(tide_All.T),
+            "max"  : tide_All.max(0),
+            "min"  : tide_All.min(0),
+            "mean" : tide_All.mean(0),
+        }
 
-        tide_stats_df = gpd.GeoDataFrame(tide_stats, 
-                                         geometry=gpd.points_from_xy(tide_stats["lon"], 
-                                                                     tide_stats["lat"])
-                                                                     )
+        tide_stats_df = gpd.GeoDataFrame(tide_stats,
+                                         geometry=gpd.points_from_xy(tide_stats["lon"], tide_stats["lat"]))
         tide_stats_df_valid = tide_stats_df[tide_stats_df["max"] != 0]
         tides_height_all[f"{target_id}_{year}"] = tide_stats_df_valid
     else:
@@ -420,8 +398,8 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
         
     # return bbox_id, tide_stats_df_valid, bbox_data_ply, gdf
     
-    print(f"    [s1] Reference point for each bbox found - Took {(time.time() - start):.2f} seconds") ; start = time.time()
-    print(f"        * Reference point saved to -> {save_folder}/s1/merge_bbox_ref_pt")
+    logger.info("    [s1] Reference points found — %.2f sec. → %s/s1/merge_bbox_ref_pt",
+                time.time() - start, save_folder) ; start = time.time()
     
     color = random_color()
     shore_data.plot(ax=ax, color=color[0], alpha=0.5)
@@ -442,14 +420,11 @@ def s1_auto_bbox_merge(river_path: str, shore_path: str, save_folder: str, base_
             })
 
 
-def s1_predefined_bbox_merge(save_folder: str, base_path: str, year: int, year_range: int, tides_height_all: dict, target_id: str):
+def s1_predefined_bbox_merge(save_folder: str, base_path: str, year: int, year_range: int,
+                             tides_height_all: dict, target_id: str,
+                             tidal_model: str = "data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc"):
 
-    print(f"    [s1] Predefined Bounding Box Merge")
-
-    print(f"        * save_folder: {save_folder}")
-    print(f"        * base_path: {base_path}")
-    print(f"        * year: {year}")
-    print(f"        * target_id: {target_id}")
+    logger.info("    [s1] Predefined Bounding Box Merge — %s  target=%s  year=%d", save_folder, target_id, year)
     
 
     predefined_bbox_txt = sorted(glob(f"{save_folder}/s1/merge_bbox_ref_pt/*.txt")) 
@@ -477,7 +452,8 @@ def s1_predefined_bbox_merge(save_folder: str, base_path: str, year: int, year_r
         predefined_bbox.append(box(x1, y1, x2, y2))
 
     if f"{target_id}_{year}" not in tides_height_all:
-        tide_All = tide_predict(f"{base_path}/data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc", np.array(lats), np.array(lons), np.array(time_range))
+        tidal_model_path = tidal_model if os.path.isabs(tidal_model) else os.path.join(base_path, tidal_model)
+        tide_All = tide_predict(tidal_model_path, np.array(lats), np.array(lons), np.array(time_range))
 
         # Add one more dimension to tide_All if it is 1D, in case of only single point
         if tide_All.ndim == 1:
@@ -496,16 +472,16 @@ def s1_predefined_bbox_merge(save_folder: str, base_path: str, year: int, year_r
         tide_stats_df_valid = tide_stats_df[tide_stats_df["max"] != 0]
 
         if tide_stats_df_valid.empty:
-            print(f"        * All the predefined tidal reference points are not valid for {target_id} in {year}, please check the tide data")
-            os._exit()
+            raise RuntimeError(
+                f"All tidal reference points for target {target_id} year {year} returned zero "
+                f"tidal amplitude. Check the tide data under data/Tide_height/."
+            )
 
-    #####################################################################################################################
-    # Bbox to shapefiles and txt
-    bboxs          = [polygon.boundary for polygon in predefined_bbox]
-    gdf            = gpd.GeoDataFrame(geometry=bboxs)
-    gdf.to_file(f"{save_folder}/s1/merged_bbox_shapefiles/{target_id}.shp", driver = 'ESRI Shapefile', crs = "EPSG:4326", engine = "fiona")
-    
-    print(f"        * Bbox shapefiles saved to -> {save_folder}/s1/merged_bbox_shapefiles/{target_id}.shp")
+    bboxs = [polygon.boundary for polygon in predefined_bbox]
+    gdf   = gpd.GeoDataFrame(geometry=bboxs)
+    gdf.to_file(f"{save_folder}/s1/merged_bbox_shapefiles/{target_id}.shp",
+                driver="ESRI Shapefile", crs="EPSG:4326", engine="fiona")
+    logger.info("        * Bbox shapefiles → %s/s1/merged_bbox_shapefiles/%s.shp", save_folder, target_id)
         
     return (tides_height_all, 
             {"bbox_id"            : bbox_id, 

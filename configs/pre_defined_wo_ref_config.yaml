@@ -19,23 +19,16 @@ s0:
 
   ## Target IDs
   # suffix: "TW" #"MD" "UK" "JP" 
-  suffix: "US" #"MD" "UK" "JP" 
-  # suffix: "Ind" #"MD" "UK" "JP" 
-
-  # UK: 
-  # target_ids         : ["26"] #["26", "15"] # id of the river and shore in data folder
-  # target_ids         : ["15"] # id of the river and shore in data folder
-
-  # NZ: 
-  # target_ids         : ["18"]
-
-  # TW:
+  suffix: "US"
   target_ids         : ["great_lakes"]
 
-  Geedim_collection  : "COPERNICUS/S2_SR_HARMONIZED"
+  random_seed        : 42   # Seed for numpy/sklearn RNG — keep fixed for reproducibility
+  gee_project        : ""   # GEE project ID (run `earthengine authenticate` first)
+  max_workers        : 5    # Maximum parallel workers for multiprocessing pool
   
 # Stage 1 - Bounding Box
-s1: 
+s1:
+  tidal_model          : "data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc"  # Path to TPXO9 atlas (relative to natshore/)
   min_area_th_degree   : 0.01    # Minimum area of bbox
   min_edge_th_km       : 10      # Minimum length of edge of bbox
   max_area_th_degree   : 0.10    # Maximum area of bbox

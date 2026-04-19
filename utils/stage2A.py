@@ -3,56 +3,72 @@ from shapely.geometry import box
 
 import geedim as gd ; gd.Initialize()
 import geopandas as gpd
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-import sys
 import pandas as pd
 
+from utils.utils import get_collection
 
-def s2A_best_tide_date(bbox_idx            : str, 
-                      base_path           : str, 
-                      save_folder         : str, 
-                      year                : int, 
+logger = logging.getLogger(__name__)
+
+
+def s2A_best_tide_date(bbox_idx            : str,
+                      base_path           : str,
+                      save_folder         : str,
+                      year                : int,
                       year_range          : int,
                       tide_All            : np.array,
-                      cloudless_portion   : int, 
-                      fill_portion        : int, 
-                      target_tidal_height : float, 
-                    #   Geedim_collection   : str, 
+                      cloudless_portion   : int,
+                      fill_portion        : int,
+                      target_tidal_height : float,
                       mode                : str,
                       disable_print       : bool = False,
-                      ):
+                      river_data_path     : str = "",
+                      shore_data_path     : str = "",
+                      ) -> None:
     """
-    Stage 2A - Best Tide & Date data
-    # Find best tide date with cloudless and fill portion conditions
+    Find and save the best satellite acquisition date for a given bounding box.
+
+    Searches the GEE catalog for scenes within the year window that satisfy
+    cloud/fill thresholds, then selects the date whose tidal height is closest
+    to ``target_tidal_height``. Results are written to
+    ``save_folder/s2A/best_bbox_ref_date/<bbox_idx>.txt``.
+
+    Args:
+        bbox_idx: Identifier string ``<island_id>_<box_index>``.
+        base_path: Absolute path to the ``natshore/`` directory.
+        save_folder: Run-specific output directory for this target/year/tide.
+        year: Start year of the search window.
+        year_range: Number of additional years to include (0 = single year).
+        tide_All: 1-D array of predicted tidal heights at 1-minute resolution.
+        cloudless_portion: Minimum acceptable cloudless percentage (relaxed if needed).
+        fill_portion: Minimum acceptable data-fill percentage (relaxed if needed).
+        target_tidal_height: Desired tidal height in metres (e.g. 0.0 for MSL).
+        mode: Pipeline mode (``auto_bbox`` | ``defined_bbox`` | ``defined_bbox_wo_ref``).
+        disable_print: When True, suppress INFO-level log output (used in worker processes).
     """
-    if disable_print: 
-        sys.stdout = open(os.devnull, 'w')
-        
+    if disable_print:
+        logging.disable(logging.INFO)
+
     if os.path.exists(f"{save_folder}/s2A/best_bbox_ref_date/{bbox_idx}.txt"):
-        print(f"Skipping {bbox_idx} as it already exists")
+        logger.info("Skipping %s — output already exists", bbox_idx)
+        if disable_print:
+            logging.disable(logging.NOTSET)
         return
-    
+
     # region Get parameters
-    
+
     target_id = bbox_idx.split("_")[0]
 
-    bbox = open(f"{save_folder}/s1/merge_bbox_ref_pt/{bbox_idx}.txt", "r").readlines()[1:][0].replace("(", "").replace(")", "").strip()
-    text_to_save = f"x1, y1, x2, y2, lat, lon, datetimes, height, FILL, CLOUDLESS, order\n"
+    with open(f"{save_folder}/s1/merge_bbox_ref_pt/{bbox_idx}.txt", "r") as fh:
+        bbox_line = fh.readlines()[1:][0].replace("(", "").replace(")", "").strip()
+    text_to_save = "x1, y1, x2, y2, lat, lon, datetimes, height, FILL, CLOUDLESS, order\n"
 
-    x1, y1, x2, y2, lat, lon, ref_pt_idx, ref_pt_dist = [float(i) for i in bbox.split(",")]
+    x1, y1, x2, y2, lat, lon, ref_pt_idx, ref_pt_dist = [float(i) for i in bbox_line.split(",")]
 
-    # Geedim_collection = "COPERNICUS/S2_SR_HARMONIZED" if year >= 2018 else "LANDSAT/LC08/C02/T1_L2"
-
-    if year >= 2018:
-        Geedim_collection = "COPERNICUS/S2_SR_HARMONIZED"
-    elif year >= 2013:
-        Geedim_collection = "LANDSAT/LC08/C02/T1_L2"
-    elif year >= 1984:
-        Geedim_collection = "LANDSAT/LT05/C02/T1_L2"
-    else:
-        raise ValueError("Year must be >= 1984 for Landsat or >= 2018 for Sentinel-2")
+    Geedim_collection = get_collection(year)
 
     coll   = gd.MaskedCollection.from_name(Geedim_collection)
     region = {"type": "Polygon", "coordinates": [[[x1, y1], [x2, y1], [x2, y2], [x1, y2], [x1, y1]]]}
@@ -60,37 +76,28 @@ def s2A_best_tide_date(bbox_idx            : str,
     good_table_split = []
     cond_switch      = 1
     best_height      = 100
-    
+
     start_date = f"{year}-01-01T00:00:00"
     end_date   = f"{year + year_range}-12-31T23:59:59"
 
-    start_run = datetime.now()
-
-    # time_range    = pd.date_range(start = f"{year}-01-01T00:00:00", end = f"{year + year_range}-12-31T23:59:59", freq = "00h01min00s") # Every 1 minute
-    time_range = pd.date_range(start = f"{year}-01-01T00:00:00", end = f"{year + year_range}-12-31T23:59:59", freq = "00h01min00s") # Every 1 minute
+    time_range    = pd.date_range(start=start_date, end=end_date, freq="00h01min00s")
     time_range_dt = [datetime.strptime(str(i), "%Y-%m-%d %H:%M:%S") for i in time_range]
 
-    print(f"Searcing for good dates with cloudless_portion: {cloudless_portion}, fill_portion: {fill_portion}, {start_date, end_date}")
+    logger.info("Searching dates — cloudless: %d%%, fill: %d%%, window: %s to %s",
+                cloudless_portion, fill_portion, start_date, end_date)
     
     # endregion
 
     # region Get all good dates with cloudless and fill portion conditions
     search_start = datetime.now()
     
-    coll_bbox = coll.search(start_date[:10], end_date[:10], region, fill_portion = 40, cloudless_portion = 40)
-    # print(start_date[:10], end_date[:10], region)
-        
-    # print(f"Search completed in {datetime.now() - search_start}")
+    coll_bbox = coll.search(start_date[:10], end_date[:10], region, fill_portion=40, cloudless_portion=40)
 
-    # Parse the properties table
     good_table       = coll_bbox.properties_table.split("\n")[2:]
-    good_table_split = [filter(None, s.split(" ")) for s in good_table]
-    good_table_split = [list(filtered) for filtered in good_table_split]
+    good_table_split = [list(filter(None, s.split(" "))) for s in good_table]
 
-    # lat_pred, lon_pred, times = read_parameter_file(f"{save_folder}/s2A/{year}_tide_time.txt", lat, lon)
-    # tide_All                  = tide_predict(f"{base_path}/data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc", lat_pred, lon_pred, times)
-
-    print(f"Got {len(good_table_split)} good dates, with {Geedim_collection}, within {start_date[:10]} and {end_date[:10]}, and region {region}")
+    logger.info("Found %d candidate scenes in %s (%s → %s)",
+                len(good_table_split), Geedim_collection, start_date[:10], end_date[:10])
 
     good_datetimes       = []
     good_dates_FILL      = []
@@ -113,16 +120,16 @@ def s2A_best_tide_date(bbox_idx            : str,
         if cond_switch == 1:
             cloudless_portion -= 5
             cond_switch = 2
-            if cloudless_portion <= 40: 
+            if cloudless_portion <= 40:
                 break
-            print(f"Condition changed!, cloudless_portion: {cloudless_portion}, fill_portion: {fill_portion}")      
-                
+            logger.info("Relaxing threshold — cloudless: %d%%, fill: %d%%", cloudless_portion, fill_portion)
+
         elif cond_switch == 2:
             fill_portion -= 5
             cond_switch = 1
-            if fill_portion <= 40: 
+            if fill_portion <= 40:
                 break
-            print(f"Condition changed!, cloudless_portion: {cloudless_portion}, fill_portion: {fill_portion}")
+            logger.info("Relaxing threshold — cloudless: %d%%, fill: %d%%", cloudless_portion, fill_portion)
             
         if len(good_datetimes_temp) == 0:
             continue
@@ -153,17 +160,7 @@ def s2A_best_tide_date(bbox_idx            : str,
         
        
 
-        # rank_FILL      = len(good_dates_height) - np.argsort(np.argsort(-np.array(good_dates_FILL)))
-        # rank_CLOUDLESS = len(good_dates_height) - np.argsort(np.argsort(-np.array(good_dates_CLOUDLESS)))
-        
-        # print("height: ", len(rank_height), good_dates_height, rank_height)
-        # print("CLOUDLESS: ", len(rank_CLOUDLESS), good_dates_CLOUDLESS, rank_FILL)
-        # print("FILL: ", len(rank_FILL), good_dates_FILL, rank_CLOUDLESS)
-        
-        # combined_ranks = 2 * rank_height + rank_FILL + rank_CLOUDLESS
-        combined_ranks = rank_height  
-        # combined_ranks = rank_CLOUDLESS + rank_height + rank_FILL
-        # print(combined_ranks, "combined_ranks")
+        combined_ranks = rank_height
         
         sorted_combination_index = np.argsort(combined_ranks)
         best_combination_index = np.argmax(combined_ranks)
@@ -176,22 +173,13 @@ def s2A_best_tide_date(bbox_idx            : str,
 
         best_date   = good_datetimes[best_combination_index]
         
-    # return good_dates_height, good_dates_FILL, good_dates_CLOUDLESS, best_date, best_height, best_FILL, best_CLOUDLESS, sorted_combination_index
-    # print(coll_bbox.properties_table)
-    # print(f"Got {len(good_table_split)} good dates")
-
-    # for idx in range(len(good_table_split)):
-        
-    print("FILL:", good_dates_FILL, rank_FILL)
-    print("CLOUDLESS:", good_dates_CLOUDLESS, rank_CLOUDLESS)
+    logger.info("Best date: %s  height: %.2f m  fill: %.1f%%  cloudless: %.1f%%",
+                best_date, best_height, best_FILL, best_CLOUDLESS)
     
     # endregion
         
     for order, idx in enumerate(sorted_combination_index[::-1]):
         text_to_save += f"{x1}, {y1}, {x2}, {y2}, {lat}, {lon}, {good_datetimes[idx]}, {good_dates_height[idx]}, {good_dates_FILL[idx]}, {good_dates_CLOUDLESS[idx]}, {order}\n"
-        
-    # text_to_save += f"{x1}, {y1}, {x2}, {y2}, {lat}, {lon}, {best_date}, {best_height}\n"
-    # print("text_to_save", text_to_save)
 
     # region Plot map and bbox
     # subfigures 
@@ -200,13 +188,8 @@ def s2A_best_tide_date(bbox_idx            : str,
     
     if plot_time_series:
         fig, axs = plt.subplots(1, 2, figsize=(25, 10))
-        # fig = plt.figure(figsize = (20,10)) 
 
-        # start_date    = f"{year}-01-01T00:00:00"
-        # end_date      = f"{year}-12-31T23:59:59"
-        # time_range    = pd.date_range(start = start_date, end = end_date, freq = "00H01T00S")
-
-        axs[0].plot(time_range, tide_All, color = "b", label = "Tide Height", zorder=1)
+        axs[0].plot(time_range, tide_All, color="b", label="Tide Height", zorder=1)
 
         axs[0].scatter(good_datetimes, good_dates_height, color = "k", label = "Good Dates", zorder=2)
         axs[0].text(best_date + timedelta(days = 7), best_height + 0.05, 
@@ -225,9 +208,9 @@ def s2A_best_tide_date(bbox_idx            : str,
         axs[0].legend()
         axs[0].grid(True)
 
-        if mode == "auto_bbox":
-            river_data = gpd.read_file(f"{base_path}/data/Shp_files/splitted_river_linstring/River_Linestring_0_id_{target_id}")
-            shore_data = gpd.read_file(f"{base_path}/data/Shp_files/splitted_shoreline_polygon/Shoreline_polygon_id_{target_id}")
+        if mode == "auto_bbox" and river_data_path and shore_data_path:
+            river_data = gpd.read_file(river_data_path)
+            shore_data = gpd.read_file(shore_data_path)
             
             river_data.plot(ax = axs[1])
             shore_data.plot(ax = axs[1])
@@ -248,14 +231,10 @@ def s2A_best_tide_date(bbox_idx            : str,
 
 
     output_file = f"{save_folder}/s2A/best_bbox_ref_date/{bbox_idx}.txt"
-
-    print(f"output_file: {output_file}")
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         f.writelines(text_to_save)
-        
-    # sys.stdout = open(os.devnull, 'w')    
-    if disable_print: 
-        sys.stdout = sys.__stdout__
-    
-    # print(f"Task {bbox_idx} completed in {datetime.now() - start_run}, {datetime.now()}")
+    logger.info("Saved best-date results → %s", output_file)
+
+    if disable_print:
+        logging.disable(logging.NOTSET)
     # endregion

@@ -55,18 +55,41 @@ cd natshore
 uv run --project .. python main.py --config auto_bbox_config.yaml
 ```
 
-Other bundled configs:
+This runs **all four stages** by default. Use `--stages` to run a subset:
+
+```bash
+# Stage 1 only — generate bounding boxes
+uv run --project .. python main.py --config auto_bbox_config.yaml --stages 1
+
+# Stage 2A only — find best acquisition date and tidal height
+uv run --project .. python main.py --config auto_bbox_config.yaml --stages 2A
+
+# Stage 2B only — download satellite imagery
+uv run --project .. python main.py --config auto_bbox_config.yaml --stages 2B
+
+# Stage 3 only — extract shorelines (most common when re-running with different parameters)
+uv run --project .. python main.py --config auto_bbox_config.yaml --stages 3
+
+# Stages can be combined freely
+uv run --project .. python main.py --config auto_bbox_config.yaml --stages 2B 3
+```
+
+By default the pipeline **resumes** the most recent output folder. Pass `--new-run` to create a new versioned folder instead. Add `--verbose` for debug-level logging.
+
+**Long/background runs:**
+
+```bash
+nohup uv run --project .. python -u main.py --config auto_bbox_config.yaml &> run.log &
+```
+
+Other bundled configs (change `--config` accordingly):
 
 ```bash
 uv run --project .. python main.py --config pre_defined_config.yaml
 uv run --project .. python main.py --config pre_defined_wo_ref_config.yaml
 ```
 
-Alternatively, activate the project environment once (`source .venv/bin/activate` on Unix, or `.venv\Scripts\activate` on Windows), `cd natshore`, then run `python main.py --config …` as above.
-
-The `--config` argument is the **filename only**; files must live in `natshore/configs/`.
-
-**Stage execution** (which stages run in a given invocation) is controlled by flags near the top of `main.py` (`run_stage1N2A`, `run_stage2B`, `run_stage3`, etc.). Adjust these for your experiment or full production run.
+The `--config` argument is the **filename only**; files must live in `natshore/configs/`. Alternatively, activate the project environment once (`source .venv/bin/activate` on Unix) and run `python main.py` directly.
 
 ## Configuration
 

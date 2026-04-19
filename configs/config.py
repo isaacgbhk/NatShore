@@ -7,7 +7,8 @@ def convert(
     ) -> namedtuple:
     
     if file_dir is not None:
-        assert file_dir.endswith("yaml"), "the file should be .yaml format"
+        if not file_dir.endswith("yaml"):
+            raise ValueError(f"Config file must be a .yaml file, got: {file_dir}")
         
         with open(file_dir, "r") as f:
             dictionary = yaml.full_load(f)
