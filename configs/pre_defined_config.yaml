@@ -67,8 +67,15 @@ s2A:
   max_retry           : 3    # For EE use limit or non data found
 
 # Stage 2B - Download Best Date & Tidal Height Data
-s2B: 
+s2B:
   max_retry          : 3
+  bands:
+    # Sentinel-2 (all collections)
+    S2    : ["B1", "B2", "B3", "B4", "B8", "B11", "B12"]
+    # Landsat 8 / 9
+    L8_L9 : ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
+    # Landsat 5
+    L5    : ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
 
 # Stage 3 - Extract Shoreline
 s3:
