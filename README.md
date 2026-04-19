@@ -42,36 +42,55 @@ Hung, H.-T. and Tsai, Y.-L.* (2026). [NatShore: Automated nation-scale shoreline
 
    This creates a local virtual environment (`.venv/`) and installs the locked dependency set. Use `uv sync --frozen` in CI or when you must reproduce the lockfile exactly.
 
-3. **Earth Engine authentication** — sign in to GEE for your account and project (for example `earthengine authenticate` after dependencies are installed). Helper patterns may live under `natshore/utils/`; ensure your GEE project ID is set wherever the code calls `ee.Initialize`.
+3. **Earth Engine authentication** — authenticate and set your project:
+
+   ```bash
+   earthengine authenticate        # opens a browser sign-in for your GEE-registered account
+   ```
+
+   Then set your GEE Cloud Project ID in the config YAML you intend to use:
+
+   ```yaml
+   # natshore/configs/auto_bbox_config.yaml
+   s0:
+     gee_project: "your-gee-project-id"
+   ```
+
+   To verify the connection, run the helper script:
+
+   ```bash
+   cd natshore
+   uv run --project . python utils/ee_Authenticate.py
+   ```
 
 **System GDAL:** If `uv sync` fails on GDAL/OSGeo bindings for your platform, install a matching system GDAL stack first, then run `uv sync` again so Python can link against it.
 
 ## Running the pipeline
 
-The CLI entry point is `natshore/main.py`. Imports assume the **`natshore` directory is the working directory**. From the repository root, use `uv run` with `--project ..` so the environment from `uv sync` is used:
+The CLI entry point is `natshore/main.py`. Imports assume the **`natshore` directory is the working directory**. From the repository root, use `uv run` with `--project .` so the environment from `uv sync` is used:
 
 ```bash
 cd natshore
-uv run --project .. python main.py --config auto_bbox_config.yaml
+uv run --project . python main.py --config auto_bbox_config.yaml
 ```
 
 This runs **all four stages** by default. Use `--stages` to run a subset:
 
 ```bash
 # Stage 1 only — generate bounding boxes
-uv run --project .. python main.py --config auto_bbox_config.yaml --stages 1
+uv run --project . python main.py --config auto_bbox_config.yaml --stages 1
 
 # Stage 2A only — find best acquisition date and tidal height
-uv run --project .. python main.py --config auto_bbox_config.yaml --stages 2A
+uv run --project . python main.py --config auto_bbox_config.yaml --stages 2A
 
 # Stage 2B only — download satellite imagery
-uv run --project .. python main.py --config auto_bbox_config.yaml --stages 2B
+uv run --project . python main.py --config auto_bbox_config.yaml --stages 2B
 
 # Stage 3 only — extract shorelines (most common when re-running with different parameters)
-uv run --project .. python main.py --config auto_bbox_config.yaml --stages 3
+uv run --project . python main.py --config auto_bbox_config.yaml --stages 3
 
 # Stages can be combined freely
-uv run --project .. python main.py --config auto_bbox_config.yaml --stages 2B 3
+uv run --project . python main.py --config auto_bbox_config.yaml --stages 2B 3
 ```
 
 By default the pipeline **resumes** the most recent output folder. Pass `--new-run` to create a new versioned folder instead. Add `--verbose` for debug-level logging.
@@ -79,14 +98,14 @@ By default the pipeline **resumes** the most recent output folder. Pass `--new-r
 **Long/background runs:**
 
 ```bash
-nohup uv run --project .. python -u main.py --config auto_bbox_config.yaml &> run.log &
+nohup uv run --project . python -u main.py --config auto_bbox_config.yaml &> run.log &
 ```
 
 Other bundled configs (change `--config` accordingly):
 
 ```bash
-uv run --project .. python main.py --config pre_defined_config.yaml
-uv run --project .. python main.py --config pre_defined_wo_ref_config.yaml
+uv run --project . python main.py --config pre_defined_config.yaml
+uv run --project . python main.py --config pre_defined_wo_ref_config.yaml
 ```
 
 The `--config` argument is the **filename only**; files must live in `natshore/configs/`. Alternatively, activate the project environment once (`source .venv/bin/activate` on Unix) and run `python main.py` directly.
@@ -97,11 +116,11 @@ YAML configs in `natshore/configs/` define global settings (`s0`) and stage-spec
 
 | Stage | Role |
 |-------|------|
-| **s0** | Mode (`auto_bbox`, `defined_bbox`, `defined_bbox_wo_ref`), data subfolders under `natshore/data/`, years, target IDs, tidal heights |
-| **s1** | Bounding-box geometry thresholds and merging behavior (auto mode) |
-| **s2A** | Cloud/fill thresholds and retries for image selection |
-| **s2B** | Download retries |
-| **s3** | MACWE iteration count, smoothing, retries |
+| **s0** | Mode (`auto_bbox`, `defined_bbox`, `defined_bbox_wo_ref`), data subfolders (`shore_folders`, `river_folders`), years, target IDs, tidal heights, GEE project ID (`gee_project`), parallel worker count (`max_workers`), and random seed |
+| **s1** | Bounding-box geometry thresholds and merging behaviour (auto mode only) |
+| **s2A** | Cloud/fill thresholds and retries for scene selection |
+| **s2B** | Download retries; per-sensor band lists (`bands.S2`, `bands.L8_L9`, `bands.L5`) — edit to customise which bands are downloaded for each satellite mission |
+| **s3** | MACWE iteration count, smoothing parameter (1–4), retries |
 
 Copy and edit a template config for new study areas rather than editing shared defaults in place.
 
@@ -111,10 +130,10 @@ Inputs are expected under `natshore/data/` as referenced in `s0` (e.g. split riv
 
 ## Examples
 
-Demonstration notebooks are under `examples/` (e.g. `1_Single_grid_demo.ipynb`). If Jupyter is included in the uv project (for example as a dev dependency), from the repository root:
+Demonstration notebooks are under `examples/`. From the repository root:
 
 ```bash
-uv run jupyter notebook examples/1_Single_grid_demo.ipynb
+uv run jupyter notebook examples/1_Shoreline_PCA_MACWE_all_in_one.ipynb
 ```
 
 ## Reproducibility
@@ -131,4 +150,4 @@ This project is released under the [MIT License](LICENSE).
 
 ## Contact
 
-For bugs, feature requests, and collaboration, please use the repository’s issue tracker once the code is public, or contact the repo author Isaac Hung (isaacghbk@caece.net).
+For bugs, feature requests, and collaboration, please use the repository’s issue tracker once the code is public, or contact the repo author Isaac Hung (isaacgbhk@caece.net).
