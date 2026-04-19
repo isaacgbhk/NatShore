@@ -174,10 +174,10 @@ def main(args: argparse.Namespace) -> None:
             while downloaded < len(bbox_idxs):
                 downloaded = len(glob(f"{save_folder}/s2B/data/*.tif"))
                 logger.info("  Downloaded: %d / %d", downloaded, len(bbox_idxs))
-                inputs = [(save_folder, bbox_idx, year, target_id) for bbox_idx in bbox_idxs]
+                inputs = [(save_folder, bbox_idx, year, target_id, cfg.s2B.bands) for bbox_idx in bbox_idxs]
                 # with multiprocessing.Pool(min(os.cpu_count(), len(bbox_idxs), max_workers)) as pool:
                 #     pool.starmap(s2B_geedim_download, tqdm(inputs, total=len(inputs)))
-                
+
                 for input in inputs:
                     s2B_geedim_download(*input)
                     downloaded = len(glob(f"{save_folder}/s2B/data/*.tif"))

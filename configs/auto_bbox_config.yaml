@@ -9,7 +9,7 @@ s0:
   shore_folders: data/Shp_files/splitted_shoreline_polygon
 
   # Result/logs folder name = year + suffix + mode + datetime
-  year  : [2024]
+  year  : [2023]
   year_range : 0 # Number of years start from year for searching best tide date, e.g. 2018: 2018 + 2
 
   target_tidal_height: [0.0] # meters
@@ -26,15 +26,15 @@ s0:
 # Stage 1 - Bounding Box
 s1:
   tidal_model          : "data/Tide_height/TPXO9_atlas_nc/TPXO9_atlas_v5_nc"  # Path to TPXO9 atlas (relative to natshore/)
-  min_area_th_degree   : 0.1   # Minimum area of bbox
+  min_area_th_degree   : 0.1      # Minimum area of bbox
   min_edge_th_km       : 20       # Minimum length of edge of bbox
-  max_area_th_degree   : 0.10    # Maximum area of bbox
-  max_edge_th_km       : 20      # Maximum length of edge of bbox
-  bbox_expand          : 0.02    # Expand degree of bbox
-  shore_expand         : 0.01   # Expand of shoreline for reference points
-  shore_n_segments     : 100     # Number of segments of shoreline for reference points
-  min_dist_th          : 0.02    # From River head to shoreline
-  iou_th               : 0.2     # IOU threshold
+  max_area_th_degree   : 0.10     # Maximum area of bbox
+  max_edge_th_km       : 20       # Maximum length of edge of bbox
+  bbox_expand          : 0.02     # Expand degree of bbox
+  shore_expand         : 0.01     # Expand of shoreline for reference points
+  shore_n_segments     : 100      # Number of segments of shoreline for reference points
+  min_dist_th          : 0.02     # From River head to shoreline
+  iou_th               : 0.2      # IOU threshold
   
 
 # Stage 2A - Best Date & Tidal Height
@@ -44,11 +44,18 @@ s2A:
   max_retry           : 3    # For EE use limit or non data found
 
 # Stage 2B - Download Best Date & Tidal Height Data
-s2B: 
+s2B:
   max_retry          : 3
+  bands:
+    # Sentinel-2 (all collections)
+    S2    : ["B1", "B2", "B3", "B4", "B8", "B11", "B12"]
+    # Landsat 8 / 9
+    L8_L9 : ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
+    # Landsat 5
+    L5    : ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
 
 # Stage 3 - Extract Shoreline
 s3:
-  MACWE_iteration   : 20   ##iterations: Number of iterations to run
-  MACWE_smooth      : 1    #default 1~4  Larger values lead to smoother segmentations.
+  MACWE_iteration   : 20   # iterations: Number of iterations to run
+  MACWE_smooth      : 1    # default 1~4  Larger values lead to smoother segmentations.
   max_retry         : 3

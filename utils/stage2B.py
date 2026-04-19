@@ -9,11 +9,17 @@ from utils.utils import get_collection
 logger = logging.getLogger(__name__)
 
 
+_SENTINEL2_COLLECTIONS = {"COPERNICUS/S2_SR", "COPERNICUS/S2", "COPERNICUS/S2_SR_HARMONIZED"}
+_LANDSAT8_9_COLLECTIONS = {"LANDSAT/LC08/C02/T1_L2", "LANDSAT/LC09/C02/T1_L2"}
+_LANDSAT5_COLLECTIONS   = {"LANDSAT/LT05/C02/T1_L2"}
+
+
 def s2B_geedim_download(
                        save_folder: str,
                        bbox_idx: str,
                        year: int,
                        target_id: str,
+                       bands_cfg=None,
                        ) -> None:
     """
     Download the best-date satellite composite for a given bounding box via geedim.
@@ -27,6 +33,7 @@ def s2B_geedim_download(
         bbox_idx: Identifier string ``<island_id>_<box_index>``.
         year: Acquisition year (determines GEE collection via :func:`get_collection`).
         target_id: Island/region identifier string.
+        bands_cfg: namedtuple from cfg.s2B.bands with fields S2, L8_L9, L5.
     """
     Geedim_collection = get_collection(year)
 
@@ -54,14 +61,12 @@ def s2B_geedim_download(
         logger.info("Skipping %s — already downloaded", bbox_idx)
         return
     
-    if Geedim_collection == "COPERNICUS/S2_SR" or Geedim_collection == "COPERNICUS/S2" or Geedim_collection == "COPERNICUS/S2_SR_HARMONIZED":
-        selected_bands = ["B1", "B2", "B3", "B4", "B8", "B11", "B12"]
-        
-    elif Geedim_collection == "LANDSAT/LC08/C02/T1_L2" or Geedim_collection == "LANDSAT/LC09/C02/T1_L2":
-        selected_bands = ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
-
-    elif Geedim_collection == "LANDSAT/LT05/C02/T1_L2":
-        selected_bands = ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
+    if Geedim_collection in _SENTINEL2_COLLECTIONS:
+        selected_bands = list(bands_cfg.S2) if bands_cfg else ["B1", "B2", "B3", "B4", "B8", "B11", "B12"]
+    elif Geedim_collection in _LANDSAT8_9_COLLECTIONS:
+        selected_bands = list(bands_cfg.L8_L9) if bands_cfg else ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
+    elif Geedim_collection in _LANDSAT5_COLLECTIONS:
+        selected_bands = list(bands_cfg.L5) if bands_cfg else ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
         
     GEEresolution = 10.0  # metres; Sentinel-2 native resolution
 
